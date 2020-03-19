@@ -1,0 +1,32 @@
+description: Sample for wait
+schemaVersion: '0.3'
+
+parameters: 
+    "Name":
+      "default": "ssmdocument"
+      "type": "String"
+      "description": "(Optional) CloudFormation StackName."
+
+mainSteps:
+- name: getLatestImageId
+  action: aws:executeAwsApi
+  inputs:
+    Service: ssm
+    Api: GetParameter
+    Name: "/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2"
+  outputs:
+  - Name: LatestImageId
+    Selector: "$.Parameter.Value"
+    Type: "String"
+
+- name: assertImage
+  action: aws:assertAwsResourceProperty
+  inputs:
+    Service: ec2
+    Api: DescribeImages
+    ImageIds :   ["{{getLatestImageId.LatestImageId}}"]
+    PropertySelector: "$.Images..ImageOwnerAlias"
+    DesiredValues: ["amazon"]
+
+outputs:
+- "getLatestImageId.LatestImageId"

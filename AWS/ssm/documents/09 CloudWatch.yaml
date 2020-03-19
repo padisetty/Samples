@@ -1,0 +1,81 @@
+#Launches an instance with CloudFormation and then executes Ansible playbook
+
+description: SSM Automation + CloudFormation Sample
+schemaVersion: '0.3'
+
+parameters: 
+    "Name":
+      "default": "ssmdocument"
+      "type": "String"
+      "description": "(Optional) CloudFormation StackName."
+
+mainSteps:
+- name: getInstanceId
+  action: aws:executeAwsApi
+  inputs:
+    Service: ec2
+    Api: DescribeInstances
+    Filters:  
+    - Name: "tag:Name"
+      Values: [ "{{Name}}-linux" ]
+    - Name: "instance-state-name"
+      Values: [ "running" ]
+  outputs:
+  - Name: instancdId
+    Selector: "$.Reservations[0].Instances[0].InstanceId"
+    Type: "String"
+
+- name: installCloudWatch
+  action: aws:runCommand
+  inputs:
+    DocumentName: AWS-ConfigureAWSPackage
+    InstanceIds: ["{{getInstanceId.instancdId}}"]
+    Parameters:
+      action: Install
+      name: AmazonCloudWatchAgent
+  
+- name: createSSMParameter
+  action: aws:executeAwsApi
+  inputs:
+    Service: ssm
+    Api: PutParameter
+    Name: AmazonCloudWatch-linux
+    Type: String
+    Overwrite: True
+    Value: |
+      {
+        "metrics": {
+          "append_dimensions": {
+            "AutoScalingGroupName": "${aws:AutoScalingGroupName}",
+            "ImageId": "${aws:ImageId}",
+            "InstanceId": "${aws:InstanceId}",
+            "InstanceType": "${aws:InstanceType}"
+          },
+          "metrics_collected": {
+            "mem": {
+              "measurement": [
+                "mem_used_percent"
+              ],
+              "metrics_collection_interval": 1
+            },
+            "swap": {
+              "measurement": [
+                "swap_used_percent"
+              ],
+              "metrics_collection_interval": 1
+            }
+          }
+        }
+      }    
+
+- name: configureCloudWatch
+  action: aws:runCommand
+  inputs:
+    DocumentName: AmazonCloudWatch-ManageAgent
+    InstanceIds: ["{{getInstanceId.instancdId}}"]
+    Parameters:
+      action: configure
+      mode: ec2
+      optionalConfigurationSource: ssm
+      optionalConfigurationLocation: "AmazonCloudWatch-linux"
+      optionalRestart: "yes"

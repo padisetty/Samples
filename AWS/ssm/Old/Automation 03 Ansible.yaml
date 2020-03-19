@@ -1,0 +1,82 @@
+
+
+
+
+
+
+
+
+
+
+
+
+
+description: Run Command Sample
+schemaVersion: '0.3'
+
+parameters: 
+    "Name":
+      "default": "ssmlinux"
+      "type": "String"
+      "description": "(Optional) CloudFormation StackName."
+
+mainSteps:
+- name: getLatestImageId
+  action: aws:executeAwsApi
+  inputs:
+    Service: ssm
+    Api: GetParameter
+    Name: "/aws/service/ami-amazon-linux-latest/amzn-ami-hvm-x86_64-gp2"
+  outputs:
+  - Name: LatestImageId
+    Selector: "$.Parameter.Value"
+    Type: "String"
+
+- name: "launchInstance"
+  action: "aws:runInstances"
+  timeoutSeconds: 300
+  onFailure: "Abort"
+  inputs:
+    ImageId: "ami-cfe4b2b0"
+    InstanceType: "t2.micro"
+    MinInstanceCount: 1
+    MaxInstanceCount: 1
+    IamInstanceProfileName: "test"
+    UserData: "IyEvYmluL2Jhc2gKZXhlYyA+ID4odGVlIC92YXIvbG9nL3VzZXItZGF0YS5sb2d8bG9nZ2VyIC10IHVzZXItZGF0YSAtcyAyPi9kZXYvY29uc29sZSkgMj4mMQojc3VkbyBhbWF6b24tbGludXgtZXh0cmFzIGluc3RhbGwgYW5zaWJsZTIKc3VkbyBwaXAgaW5zdGFsbCBhbnNpYmxl"
+    TagSpecifications:
+      - ResourceType: "instance"
+        Tags:
+        - Key: "Name"
+          Value: "{{Name}}"
+
+- name: runCommand
+  action: aws:runCommand
+  inputs:
+    DocumentName: AWS-RunAnsiblePlaybook
+    InstanceIds: ["{{launchInstance.InstanceIds}}"]
+    Parameters:
+      playbook: 
+        - |
+          - name: Simple example
+            hosts: all
+            
+            tasks:
+            - name: Create a file called '/tmp/testfile.txt'
+              copy: 
+                content: "hello world\n"
+                dest: /tmp/testfile.txt
+                force: yes
+
+            - name: print message
+              shell: echo "Hello World!"
+
+- name: terminate
+  action: aws:changeInstanceState
+  maxAttempts: 3
+  inputs:
+    DesiredState: terminated
+    InstanceIds: ["{{launchInstance.InstanceIds}}"]
+
+outputs:
+- "launchInstance.InstanceIds"
+- "runCommand.CommandId"

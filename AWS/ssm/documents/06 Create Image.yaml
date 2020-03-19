@@ -1,0 +1,39 @@
+description: Sample for wait
+schemaVersion: '0.3'
+
+parameters: 
+    "Name":
+      "default": "ssmdocument"
+      "type": "String"
+      "description": "(Optional) CloudFormation StackName."
+
+mainSteps:
+- name: getLatestImageId
+  action: aws:executeAwsApi
+  inputs:
+    Service: ssm
+    Api: GetParameter
+    Name: "/aws/service/ami-amazon-linux-latest/amzn-ami-hvm-x86_64-gp2"
+  outputs:
+  - Name: LatestImageId
+    Selector: "$.Parameter.Value"
+    Type: "String"
+
+- name: createImage
+  action: aws:executeAutomation
+  inputs:
+    DocumentName: AWS-UpdateLinuxAmi
+    RuntimeParameters:
+      SourceAmiId: "{{getLatestImageId.LatestImageId}}"
+      IamInstanceProfileName: "{{Name}}"
+      AutomationAssumeRole: ''
+
+- name: deleteImage
+  action: aws:executeAwsApi
+  inputs:
+    Service: ec2
+    Api: DeregisterImage
+    ImageId: "{{createImage.Output}}"
+
+outputs:
+- "getLatestImageId.LatestImageId"

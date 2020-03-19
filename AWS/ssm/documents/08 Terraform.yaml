@@ -1,0 +1,136 @@
+#Creates a instance, runs terraform template and terminates the instance
+schemaVersion: '0.3'
+
+parameters: 
+    Name:
+      default: ssmdocument
+      type: String
+      description: "(Optional) CloudFormation StackName."
+
+    GitHubOwner:
+      default: padisetty
+      type: "String"
+      description: "(Optional) User name for the GitHub."
+    GitHubRepository:
+      default: Samples
+      type: "String"
+      description: "(Optional) GitHub Repository where the Terraform module exist."
+    GitHubPath:
+      default: "AWS/ssm/documents/terraform"
+      type: "String"
+      description: "(Optional) Path within the repo to be copied."
+
+    TerraformBackendBucket:
+      default: "sivaiadbucket"
+      type: "String"
+      description: "(Optional) Bucket to store the state."
+    TerraformBackendKey:
+      default: "ssm/terraform.txt"
+      type: "String"
+      description: "(Optional) key to save the state file."
+    TerraformBackendRegion:
+      default: "us-east-1"
+      type: "String"
+      description: "(Optional) Bucket to store the state."
+
+mainSteps:
+- name: createStack
+  action: aws:createStack
+  inputs:
+    StackName: "{{Name}}"
+    Capabilities: [ "CAPABILITY_IAM" ]
+    TemplateBody: |
+      Description: "SSM Automation and CloudFormation Sample"
+      Parameters:
+        LatestAmiId:
+          Type: 'AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>'
+          Default: "/aws/service/ami-amazon-linux-latest/amzn-ami-hvm-x86_64-gp2"
+      
+      Resources:
+        SecurityGroup:
+          Type: AWS::EC2::SecurityGroup
+          Properties:
+            GroupDescription: testing
+
+        TestRole: 
+          Type : AWS::IAM::Role
+          Properties:
+            AssumeRolePolicyDocument:
+              Version: "2012-10-17"
+              Statement:
+              - Effect: "Allow"
+                Principal:
+                  Service:
+                  - "ec2.amazonaws.com"
+                  - "ssm.amazonaws.com"
+                Action: "sts:AssumeRole"
+            ManagedPolicyArns:
+            - "arn:aws:iam::aws:policy/service-role/AmazonEC2RoleforSSM"
+            - "arn:aws:iam::aws:policy/AmazonSSMFullAccess"
+
+        IamInstanceProfile:
+          Type: "AWS::IAM::InstanceProfile"
+          Properties:
+            Roles:
+            - !Ref TestRole
+      
+        EC2Instance:
+          Type: "AWS::EC2::Instance"
+          Properties:
+            ImageId: !Ref LatestAmiId
+            InstanceType: "t2.micro"
+            IamInstanceProfile: !Ref IamInstanceProfile
+            Tags:
+            - Key: "Name"
+              Value: "{{Name}}-linux-cfnansible"
+
+- name: getInstanceId
+  action: aws:executeAwsApi
+  onFailure: "step:deleteStack"
+  inputs:
+    Service: ec2
+    Api: DescribeInstances
+    Filters:  
+    - Name: "tag:Name"
+      Values: [ "{{Name}}-linux-cfnansible" ]
+    - Name: "instance-state-name"
+      Values: [ "running" ]
+  outputs:
+  - Name: instancdId
+    Selector: "$.Reservations[0].Instances[0].InstanceId"
+    Type: "String"
+
+- name: runCommandTerraform
+  action: aws:runCommand
+  onFailure: "step:deleteStack"
+  inputs:
+    DocumentName: AWS-RunRemoteScript
+    InstanceIds:
+    - "{{getInstanceId.instancdId}}"
+    Parameters:
+      sourceType: GitHub
+      sourceInfo: '{ "owner": "{{GitHubOwner}}", "repository": "{{GitHubRepository}}", "path": "{{GitHubPath}}"}'
+      commandLine: 
+      - |
+        echo 'terraform {
+        backend "s3" {
+          bucket = "{{TerraformBackendBucket}}"
+          key    = "{{TerraformBackendKey}}"
+          region = "{{TerraformBackendRegion}}"
+          }
+        }' > backend_override.tf
+        
+        wget https://releases.hashicorp.com/terraform/0.11.8/terraform_0.11.8_linux_amd64.zip 2>/dev/null
+        unzip terraform_0.11.8_linux_amd64.zip 2>/dev/null
+        terraform init -input=false
+        terraform apply -input=false -auto-approve
+
+- name: deleteStack
+  action: aws:deleteStack
+  onFailure: Continue
+  inputs:
+    StackName: "{{Name}}"
+
+outputs:
+- "getInstanceId.instancdId"
+- "runCommandTerraform.CommandId"

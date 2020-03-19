@@ -1,0 +1,103 @@
+#Creates an instance, executes Ansible playbook from https://github.com/padisetty/Samples/tree/master/AWS/ssm/documents/ansible
+description: Run Command with Ansible Sample
+schemaVersion: '0.3'
+
+parameters: 
+    "Name":
+      "default": "ssmdocument"
+      "type": "String"
+      "description": "(Optional) CloudFormation StackName."
+
+mainSteps:
+- name: getLatestImageId
+  action: aws:executeAwsApi
+  inputs:
+    Service: ssm
+    Api: GetParameter
+    Name: "/aws/service/ami-amazon-linux-latest/amzn-ami-hvm-x86_64-gp2"
+  outputs:
+  - Name: LatestImageId
+    Selector: "$.Parameter.Value"
+    Type: "String"
+
+- name: launchInstance
+  action: aws:executeAwsApi
+  inputs:
+    Service: ec2
+    Api: RunInstances
+    ImageId: "{{ getLatestImageId.LatestImageId }}"
+    InstanceType: "t2.micro"
+    IamInstanceProfile: 
+      Name: "test"
+    MaxCount: 1
+    MinCount: 1
+    TagSpecifications:
+      - ResourceType: "instance"
+        Tags:
+        - Key: "Name"
+          Value: "{{Name}}-linux-ansible"
+  outputs:
+  - Name: InstanceIds
+    Selector: "$.Instances..InstanceId"
+    Type: "StringList"
+
+- name: waitStep
+  action: aws:waitForAwsResourceProperty
+  onFailure: "step:terminate"
+  inputs:
+    Service: ssm
+    Api: DescribeInstanceInformation
+    InstanceInformationFilterList:
+    - 
+      key: 'InstanceIds'
+      valueSet: ["{{ launchInstance.InstanceIds }}"]
+    PropertySelector: "$..PingStatus"
+    DesiredValues:
+    - Online
+
+- name: ansibleInstall
+  action: aws:runCommand
+  onFailure: "step:terminate"
+  inputs:
+    DocumentName: AWS-RunShellScript
+    InstanceIds: ["{{launchInstance.InstanceIds}}"]
+    Parameters:
+      commands: 
+        - |
+          #sudo amazon-linux-extras install ansible2
+          sudo pip install ansible
+
+- name: runCommand
+  action: aws:runCommand
+  onFailure: "step:terminate"
+  inputs:
+    DocumentName: AWS-RunAnsiblePlaybook
+    InstanceIds: ["{{launchInstance.InstanceIds}}"]
+    Parameters:
+      playbook: 
+        - |
+          - name: Simple example
+            hosts: all
+            
+            tasks:
+            - name: Create a file called '/tmp/testfile.txt'
+              copy: 
+                content: "hello world\n"
+                dest: /tmp/testfile.txt
+                force: yes
+
+            - name: print message
+              shell: echo "Hello World!"
+
+- name: terminate
+  action: aws:executeAwsApi
+  onFailure: Continue
+  inputs:
+    Service: ec2
+    Api: TerminateInstances
+    InstanceIds:
+    - "{{ launchInstance.InstanceIds }}"
+
+outputs:
+- "launchInstance.InstanceIds"
+- "runCommand.CommandId"

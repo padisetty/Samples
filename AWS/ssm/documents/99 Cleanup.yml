@@ -1,0 +1,16 @@
+description: SSM Automation Setup
+schemaVersion: '0.3'
+
+parameters: 
+    "Name":
+      "default": "ssmdocument"
+      "type": "String"
+      "description": "(Optional) CloudFormation StackName."
+
+mainSteps:
+- name: deleteStack
+  action: aws:deleteStack
+  onFailure: Continue
+  inputs:
+    StackName: "{{Name}}-setup"
+

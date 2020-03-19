@@ -1,0 +1,49 @@
+#Launches an instance with CloudFormation and then executes Ansible playbook
+
+description: SSM Automation + CloudFormation Sample
+schemaVersion: '0.3'
+
+parameters: 
+    "Name":
+      "default": "ssmdocument"
+      "type": "String"
+      "description": "(Optional) CloudFormation StackName."
+
+mainSteps:
+- name: getInstanceId
+  action: aws:executeAwsApi
+  inputs:
+    Service: ec2
+    Api: DescribeInstances
+    Filters:  
+    - Name: "tag:Name"
+      Values: [ "{{Name}}-windows" ]
+    - Name: "instance-state-name"
+      Values: [ "running" ]
+  outputs:
+  - Name: instancdId
+    Selector: "$.Reservations[0].Instances[0].InstanceId"
+    Type: "String"
+
+- name: rebootTest
+  action: aws:runCommand
+  inputs:
+    DocumentName: AWS-RunPowerShellScript
+    InstanceIds: ["{{getInstanceId.instancdId}}"]
+    Parameters:
+      commands: 
+        - |
+          function Test2 ()
+          {
+              'Hello this is test2'
+              if (! (Test-Path c:\test)) {
+                  'returning 3010, should continue after reboot'
+                  $null = md c:\test
+                  exit 3010 # Reboot requested
+              } else {
+                  del c:\test -force
+                  'Test2 completed!!!'
+              }
+          }
+
+          Test2

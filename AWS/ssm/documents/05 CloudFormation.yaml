@@ -1,0 +1,120 @@
+#Launches an instance with CloudFormation and then executes Ansible playbook
+
+description: SSM Automation + CloudFormation Sample
+schemaVersion: '0.3'
+
+parameters: 
+    "Name":
+      "default": "ssmdocument"
+      "type": "String"
+      "description": "(Optional) CloudFormation StackName."
+
+mainSteps:
+- name: createStack
+  action: aws:createStack
+  inputs:
+    StackName: "{{Name}}"
+    Capabilities: [ "CAPABILITY_IAM" ]
+    TemplateBody: |
+      Description: "SSM Automation and CloudFormation Sample"
+      Parameters:
+        LatestAmiId:
+          Type: 'AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>'
+          Default: "/aws/service/ami-amazon-linux-latest/amzn-ami-hvm-x86_64-gp2"
+      
+      Resources:
+        SecurityGroup:
+          Type: AWS::EC2::SecurityGroup
+          Properties:
+            GroupDescription: testing
+
+        TestRole: 
+          Type : AWS::IAM::Role
+          Properties:
+            AssumeRolePolicyDocument:
+              Version: "2012-10-17"
+              Statement:
+              - Effect: "Allow"
+                Principal:
+                  Service:
+                  - "ec2.amazonaws.com"
+                  - "ssm.amazonaws.com"
+                Action: "sts:AssumeRole"
+            ManagedPolicyArns:
+            - "arn:aws:iam::aws:policy/service-role/AmazonEC2RoleforSSM"
+
+        IamInstanceProfile:
+          Type: "AWS::IAM::InstanceProfile"
+          Properties:
+            Roles:
+            - !Ref TestRole
+      
+        EC2Instance:
+          Type: "AWS::EC2::Instance"
+          Properties:
+            ImageId: !Ref LatestAmiId
+            InstanceType: "t2.micro"
+            IamInstanceProfile: !Ref IamInstanceProfile
+            Tags:
+            - Key: "Name"
+              Value: "{{Name}}-linux-cfnansible"
+
+- name: getInstanceId
+  action: aws:executeAwsApi
+  onFailure: "step:deleteStack"
+  inputs:
+    Service: ec2
+    Api: DescribeInstances
+    Filters:  
+    - Name: "tag:Name"
+      Values: [ "{{Name}}-linux-cfnansible" ]
+    - Name: "instance-state-name"
+      Values: [ "running" ]
+  outputs:
+  - Name: instancdId
+    Selector: "$.Reservations[0].Instances[0].InstanceId"
+    Type: "String"
+
+- name: ansibleInstall
+  action: aws:runCommand
+  onFailure: "step:deleteStack"
+  inputs:
+    DocumentName: AWS-RunShellScript
+    InstanceIds: ["{{getInstanceId.instancdId}}"]
+    Parameters:
+      commands: 
+        - |
+          #sudo amazon-linux-extras install ansible2
+          sudo pip install ansible
+
+- name: runCommand
+  action: aws:runCommand
+  onFailure: "step:deleteStack"
+  inputs:
+    DocumentName: AWS-RunAnsiblePlaybook
+    InstanceIds: ["{{getInstanceId.instancdId}}"]
+    Parameters:
+      playbook: 
+        - |
+          - name: Simple example
+            hosts: all 
+            tasks:
+            - name: Create a file called '/tmp/testfile.txt'
+              copy: 
+                content: "hello world\n"
+                dest: /tmp/testfile.txt
+                force: yes
+
+            - name: print message
+              shell: echo "Hello World!"
+
+- name: deleteStack
+  action: aws:deleteStack
+  onFailure: Continue
+  inputs:
+    StackName: "{{Name}}"
+
+outputs:
+- "createStack.StackId"
+- "createStack.StackStatus"
+- "createStack.StackStatusReason"

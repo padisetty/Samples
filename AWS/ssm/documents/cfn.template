@@ -1,0 +1,37 @@
+Description: "CloudFormation Sample"
+Parameters:
+  LatestAmiId:
+    Type: 'AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>'
+    Default: "/aws/service/ami-amazon-linux-latest/amzn-ami-hvm-x86_64-gp2"
+
+Resources:
+  TestRole: 
+    Type : AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+        - Effect: "Allow"
+          Principal:
+            Service:
+            - "ec2.amazonaws.com"
+            - "ssm.amazonaws.com"
+          Action: "sts:AssumeRole"
+      ManagedPolicyArns:
+      - "arn:aws:iam::aws:policy/service-role/AmazonEC2RoleforSSM"
+
+  IamInstanceProfile:
+    Type: "AWS::IAM::InstanceProfile"
+    Properties:
+      Roles:
+      - !Ref TestRole
+
+  EC2Instance:
+    Type: "AWS::EC2::Instance"
+    Properties:
+      ImageId: !Ref LatestAmiId
+      InstanceType: "t2.micro"
+      IamInstanceProfile: !Ref IamInstanceProfile
+      Tags:
+      - Key: "Name"
+        Value: "cloudformation-managedinstance"

@@ -1,0 +1,83 @@
+#Creates an instance, executes PowerShell from https://github.com/padisetty/Samples/tree/master/AWS/ssm/documents/powershell
+#The target includes a powershell module, multiple files.
+description: Run Command with Ansible Sample
+schemaVersion: '0.3'
+
+parameters: 
+    "Name":
+      "default": "ssmdocument"
+      "type": "String"
+      "description": "(Optional) CloudFormation StackName."
+
+mainSteps:
+- name: getLatestImageId
+  action: aws:executeAwsApi
+  inputs:
+    Service: ssm
+    Api: GetParameter
+#    Name: "/aws/service/ami-windows-latest/Windows_Server-2016-English-Full-Base"
+    Name: "/aws/service/ami-windows-latest/Windows_Server-2012-R2_RTM-English-64Bit-Base"
+  outputs:
+  - Name: LatestImageId
+    Selector: "$.Parameter.Value"
+    Type: "String"
+
+- name: launchInstance
+  action: aws:executeAwsApi
+  inputs:
+    Service: ec2
+    Api: RunInstances
+    ImageId: "{{ getLatestImageId.LatestImageId }}"
+    InstanceType: "t2.micro"
+    IamInstanceProfile: 
+      Name: "{{Name}}"
+    MaxCount: 1
+    MinCount: 1
+    TagSpecifications:
+      - ResourceType: "instance"
+        Tags:
+        - Key: "Name"
+          Value: "{{Name}}-windows-powershell"
+  outputs:
+  - Name: InstanceIds
+    Selector: "$.Instances..InstanceId"
+    Type: "StringList"
+
+- name: waitStep
+  action: aws:waitForAwsResourceProperty
+  onFailure: "step:terminate"
+  inputs:
+    Service: ssm
+    Api: DescribeInstanceInformation
+    InstanceInformationFilterList:
+    - 
+      key: 'InstanceIds'
+      valueSet: ["{{ launchInstance.InstanceIds }}"]
+    PropertySelector: "$..PingStatus"
+    DesiredValues:
+    - Online
+
+- name: runCommand
+  action: aws:runCommand
+  onFailure: "step:terminate"
+  inputs:
+    DocumentName: AWS-RunRemoteScript
+    InstanceIds:
+    - "{{launchInstance.InstanceIds}}"
+    Parameters:
+      sourceType: GitHub
+      sourceInfo: '{ "owner": "padisetty", "repository": "Samples", "path": "AWS/ssm/documents/powershell"}'
+      commandLine: './run.ps1; ./dscrun.ps1' 
+
+- name: terminate
+  action: aws:executeAwsApi
+  onFailure: Continue
+  inputs:
+    Service: ec2
+    Api: TerminateInstances
+    InstanceIds:
+    - "{{ launchInstance.InstanceIds }}"
+
+outputs:
+- "launchInstance.InstanceIds"
+- "runCommand.CommandId"

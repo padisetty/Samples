@@ -1,0 +1,130 @@
+description: SSM Automation Setup
+schemaVersion: '0.3'
+
+parameters: 
+    "Name":
+      "default": "ssmdocument"
+      "type": "String"
+      "description": "(Optional) CloudFormation StackName."
+
+mainSteps:
+- name: deleteStack
+  action: aws:deleteStack
+  onFailure: Continue
+  inputs:
+    StackName: "{{Name}}-setup"
+
+- name: createStack
+  action: aws:createStack
+  inputs:
+    StackName: "{{Name}}-setup"
+    Capabilities: [ "CAPABILITY_NAMED_IAM" ]
+    TemplateBody: |
+      Description: "SSM Automation Setup"
+      Parameters:
+        LinuxLatestAmiId:
+          Type: 'AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>'
+          Default: "/aws/service/ami-amazon-linux-latest/amzn-ami-hvm-x86_64-gp2"
+        WindowsLatestAmiId:
+          Type: 'AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>'
+          Default: "/aws/service/ami-windows-latest/Windows_Server-2012-R2_RTM-English-64Bit-Base"
+      
+      Resources:
+        TestRole: 
+          Type : AWS::IAM::Role
+          Properties:
+            RoleName: "{{Name}}"
+            AssumeRolePolicyDocument:
+              Version: "2012-10-17"
+              Statement:
+              - Effect: "Allow"
+                Principal:
+                  Service:
+                  - "ec2.amazonaws.com"
+                  - "ssm.amazonaws.com"
+                Action: "sts:AssumeRole"
+            ManagedPolicyArns:
+            - "arn:aws:iam::aws:policy/service-role/AmazonEC2RoleforSSM"
+            - "arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy"
+            - "arn:aws:iam::aws:policy/AmazonSSMFullAccess"
+        IamInstanceProfile:
+          Type: "AWS::IAM::InstanceProfile"
+          Properties:
+            InstanceProfileName: "{{Name}}"
+            Roles:
+            - !Ref TestRole
+
+        LinuxEC2Instance1:
+          Type: "AWS::EC2::Instance"
+          Properties:
+            ImageId: !Ref LinuxLatestAmiId
+            InstanceType: "t2.micro"
+            IamInstanceProfile: !Ref IamInstanceProfile
+            Tags:
+            - Key: "Name"
+              Value: "{{Name}}-linux"    
+        LinuxEC2Instance2:
+          Type: "AWS::EC2::Instance"
+          Properties:
+            ImageId: !Ref LinuxLatestAmiId
+            InstanceType: "t2.micro"
+            IamInstanceProfile: !Ref IamInstanceProfile
+            Tags:
+            - Key: "Name"
+              Value: "{{Name}}-linux"    
+        LinuxAssociation1:
+          Type: "AWS::SSM::Association"
+          Properties:
+            AssociationName: "Linux-RunPatchBaseline"
+            Name: "AWS-RunPatchBaseline"
+            ScheduleExpression: "cron(0 2 0 ? * SUN *)"
+            Targets:
+            - Key: tag:Name
+              Values: ["{{Name}}-linux"]
+            Parameters:
+              Operation: [ "Install" ]
+
+        WindowsEC2Instance1:
+          Type: "AWS::EC2::Instance"
+          Properties:
+            ImageId: !Ref WindowsLatestAmiId
+            InstanceType: "t2.micro"
+            IamInstanceProfile: !Ref IamInstanceProfile
+            Tags:
+            - Key: "Name"
+              Value: "{{Name}}-windows"    
+        WindowsAssociation1:
+          Type: "AWS::SSM::Association"
+          Properties:
+            AssociationName: "Windows-RunPatchBaseline"
+            Name: "AWS-RunPatchBaseline"
+            ScheduleExpression: "cron(0 2 0 ? * SUN *)"
+            Targets:
+            - Key: tag:Name
+              Values: ["{{Name}}-windows"]
+            Parameters:
+              Operation: [ "Install" ]
+
+        Association1:
+          Type: "AWS::SSM::Association"
+          Properties:
+            AssociationName: "GatherSoftwareInventory"
+            Name: "AWS-GatherSoftwareInventory"
+            ScheduleExpression: "rate(30 minutes)"
+            Targets:
+            - Key: InstanceIds
+              Values: ["*"]
+        Association2:
+          Type: "AWS::SSM::Association"
+          Properties:
+            AssociationName: "UpdateSSMAgentDaily"
+            Name: "AWS-UpdateSSMAgent"
+            ScheduleExpression: "rate(1 day)"
+            Targets:
+            - Key: tag:Name
+              Values: ["{{Name}}-linux", "{{Name}}-windows"]
+
+outputs:
+- "createStack.StackId"
+- "createStack.StackStatus"
+- "createStack.StackStatusReason"

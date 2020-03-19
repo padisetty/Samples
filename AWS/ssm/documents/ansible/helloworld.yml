@@ -1,0 +1,12 @@
+- name: Simple example
+  hosts: all
+  
+  tasks:
+  - name: Create a file called '/tmp/testfile.txt'
+    copy: 
+      content: "hello world\n"
+      dest: /tmp/testfile.txt
+      force: yes
+
+  - name: print message
+    shell: echo "Hello World!"

@@ -1,0 +1,87 @@
+#This reference architecture creates an AWS CodeCommit Repo, CodePipeline, and CodeBuild.
+#This pipeline will allow infrastructrue engineers to use Infrastructure as Code (IaC) to mange the Portfolios
+# and Products across multiple accounts and regions in ServiceCatalog. 
+#The pipeline includes sample template validation and cfn_nag stages. Updating a ServiceCatalog becomes as easy as git push
+
+description: AWS Service Catalog CodePipeline Automation Reference architecture
+schemaVersion: '0.3'
+
+parameters: 
+    "Name":
+      "default": "SCPipelineReference"
+      "type": "String"
+      "description": "(Optional) CloudFormation StackName."
+
+mainSteps:
+#delete previous Stacks if present. It will continue on error
+- name: deleteStackStep1
+  action: aws:deleteStack
+  onFailure: Continue
+  inputs:
+    StackName: "{{Name}}-Step1"
+- name: deleteStackStep2
+  action: aws:deleteStack
+  onFailure: Continue
+  inputs:
+    StackName: "{{Name}}-Step2"
+- name: deleteStackStep3
+  action: aws:deleteStack
+  onFailure: Continue
+  inputs:
+    StackName: "{{Name}}-Step3"
+
+- name: createStackStep1
+  action: aws:createStack
+  inputs:
+    StackName: "{{Name}}-Step1"
+    Capabilities: [ "CAPABILITY_NAMED_IAM" ]
+    TemplateURL: "https://s3.amazonaws.com/aws-service-catalog-reference-architectures/codepipeline/sc-codepipeline-ra.json"
+    Parameters:
+    - ParameterKey: ChildAccountAccess
+      ParameterValue: ""
+
+- name: createStackStep2
+  action: aws:createStack
+  inputs:
+    StackName: "{{Name}}-Step2"
+    Capabilities: [ "CAPABILITY_NAMED_IAM" ]
+    TemplateURL: "https://s3.amazonaws.com/aws-service-catalog-reference-architectures/iam/sc-demosetup-iam.json"
+
+- name: createStackStep3
+  action: aws:executeAwsApi
+  inputs:
+    Service: cloudformation
+    Api: CreateStack
+    StackName: "{{Name}}-Step3"
+    Capabilities: [ "CAPABILITY_NAMED_IAM", "CAPABILITY_AUTO_EXPAND" ]
+    TemplateURL: "https://s3.amazonaws.com/aws-service-catalog-reference-architectures/ec2/sc-portfolio-ec2VPC.json"
+    Parameters:
+    - ParameterKey: LaunchRoleName
+      ParameterValue: ""
+    - ParameterKey: LinkedRole1
+      ParameterValue: ""
+    - ParameterKey: LinkedRole2
+      ParameterValue: ""
+  outputs:
+  - Name: StackId
+    Selector: "$.StackId"
+    Type: "String"
+- name: waitStep
+  action: aws:waitForAwsResourceProperty
+  onFailure: "Abort"
+  inputs:
+    Service: cloudformation
+    Api: DescribeStacks
+    StackName: "{{createStackStep3.StackId}}"
+    PropertySelector: "$..StackStatus"
+    DesiredValues:
+    - CREATE_FAILED
+    - CREATE_COMPLETE
+    - ROLLBACK_FAILED
+    - ROLLBACK_COMPLETE    
+
+
+outputs:
+- "createStackStep1.StackId"
+- "createStackStep1.StackStatus"
+- "createStackStep1.StackStatusReason"

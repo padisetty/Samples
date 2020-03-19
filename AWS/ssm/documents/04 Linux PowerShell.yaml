@@ -1,0 +1,70 @@
+#Creates an instance, executes PowerShell from https://github.com/padisetty/Samples/tree/master/AWS/ssm/documents/powershell
+#The target includes a powershell module, multiple files.description: Linux PowerShell
+schemaVersion: '0.3'
+
+parameters: 
+    "Name":
+      "default": "ssmdocument"
+      "type": "String"
+      "description": "(Optional) CloudFormation StackName."
+
+mainSteps:
+- name: launchInstance
+  action: aws:executeAwsApi
+  inputs:
+    Service: ec2
+    Api: RunInstances
+    ImageId: ami-c4596fbb # NET Core 2.1 with Amazon Linux 2 - Version 1.0
+    InstanceType: "t2.micro"
+    IamInstanceProfile: 
+      Name: "{{Name}}"
+    MaxCount: 1
+    MinCount: 1
+    TagSpecifications:
+      - ResourceType: "instance"
+        Tags:
+        - Key: "Name"
+          Value: "{{Name}}-linux-powershell"
+  outputs:
+  - Name: InstanceIds
+    Selector: "$.Instances..InstanceId"
+    Type: "StringList"
+
+- name: waitStep
+  action: aws:waitForAwsResourceProperty
+  onFailure: "step:terminate"
+  inputs:
+    Service: ssm
+    Api: DescribeInstanceInformation
+    InstanceInformationFilterList:
+    - 
+      key: 'InstanceIds'
+      valueSet: ["{{ launchInstance.InstanceIds }}"]
+    PropertySelector: "$..PingStatus"
+    DesiredValues:
+    - Online
+
+- name: runCommand
+  action: aws:runCommand
+  onFailure: "step:terminate"
+  inputs:
+    DocumentName: AWS-RunRemoteScript
+    InstanceIds:
+    - "{{launchInstance.InstanceIds}}"
+    Parameters:
+      sourceType: GitHub
+      sourceInfo: '{ "owner": "padisetty", "repository": "Samples", "path": "AWS/ssm/documents/powershell"}'
+      commandLine: 'pwsh ./run.ps1' 
+
+- name: terminate
+  action: aws:executeAwsApi
+  onFailure: Continue
+  inputs:
+    Service: ec2
+    Api: TerminateInstances
+    InstanceIds:
+    - "{{ launchInstance.InstanceIds }}"
+
+outputs:
+- "launchInstance.InstanceIds"
+- "runCommand.CommandId"
